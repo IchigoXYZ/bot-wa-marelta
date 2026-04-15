@@ -9,6 +9,19 @@ const path = require("path");
 
 const app = express();
 
+// --- CONFIGURACIÓN DE DEBUG ---
+const DEBUG_CONFIG = {
+  enabled: true, // true: muestra logs y BLOQUEA el envío de mensajes. false: funcionamiento normal.
+};
+
+function debugLog(step, data) {
+  if (DEBUG_CONFIG.enabled) {
+    console.log(`[${step}]`);
+    console.log(data);
+    console.log("-----------------------------------------");
+  }
+}
+
 const groq = new Groq({
   apiKey: process.env.GROQ_API_KEY,
 });
@@ -72,7 +85,6 @@ Horario de atención: 9 am a 4 pm de lunes a viernes.
 3. Proveedores: Si ofrecen mercancía, capta contacto, precio y volumen.
 `;
 
-// --- FUNCIÓN DE NORMALIZACIÓN ---
 function normalizarTexto(texto) {
   if (!texto) return "";
   return texto
@@ -89,14 +101,22 @@ function normalizarTexto(texto) {
     .trim();
 }
 
-// --- FUNCIÓN DE BÚSQUEDA EN API REAL ---
 async function buscarEnApi(query) {
   try {
+    debugLog("SOLICITUD API", `Iniciando fetch a: https://marelta.com/productos/`);
     const response = await fetch("https://marelta.com/productos/");
     if (!response.ok) throw new Error("Error al conectar con la API");
 
     const productos = await response.json();
+    
+    // --- DEBUG DE RESPUESTA CRUDA ---
+    if (DEBUG_CONFIG.enabled) {
+      debugLog("API DATA RECIBIDA (JSON CRUDO)", JSON.stringify(productos, null, 2).slice(0, 2000) + "... (truncado para lectura)");
+    }
+
     const queryNorm = normalizarTexto(query);
+    debugLog("NORMALIZACIÓN", `Query original: "${query}" -> Normalizado: "${queryNorm}"`);
+
     const palabrasUsuario = queryNorm.split(/\s+/).filter((p) => p.length >= 3);
 
     const coincidencias = productos
@@ -113,7 +133,6 @@ async function buscarEnApi(query) {
         );
       })
       .map((item) => {
-        // Lógica de precio: Priorizar USD, si es 0 usar CUP
         const precioDisplay =
           item.price_sell_usd > 0
             ? `${item.price_sell_usd} USD`
@@ -121,6 +140,8 @@ async function buscarEnApi(query) {
 
         return `${item.name} - Precio: ${precioDisplay} (Stock: ${item.stock})`;
       });
+
+    debugLog("FILTRADO DE COINCIDENCIAS", coincidencias.length > 0 ? coincidencias : "No se encontraron productos tras filtrar");
 
     return coincidencias.length > 0
       ? coincidencias.slice(0, 15).join(", ")
@@ -131,7 +152,6 @@ async function buscarEnApi(query) {
   }
 }
 
-// --- SERVIDOR WEB QR ---
 app.get("/qr", (req, res) => {
   const qrPath = path.join(__dirname, "qr.png");
   if (fs.existsSync(qrPath)) {
@@ -152,7 +172,6 @@ app.listen(PORT, "0.0.0.0", () => {
   console.log(`✅ Servidor comercial (API Mode) listo en puerto ${PORT}`);
 });
 
-// --- EVENTOS WHATSAPP ---
 client.on("qr", (qr) => {
   qrcodeTerminal.generate(qr, { small: true });
   QRCode.toFile("./qr.png", qr, {
@@ -180,32 +199,54 @@ client.on("message", async (msg) => {
   if (contact.isEnterprise) return;
 
   try {
-    // Buscamos directamente en la API de la web
+    if (DEBUG_CONFIG.enabled) {
+      console.log("\n=========================================================");
+      console.log(`🚀 INICIANDO PROCESAMIENTO: ${new Date().toLocaleTimeString()}`);
+      console.log("=========================================================");
+    }
+
+    debugLog("MENSAJE RECIBIDO", `De: ${msg.from} - Mensaje: ${msg.body}`);
+
     const hallazgos = await buscarEnApi(msg.body);
+
+    const contextPayload = `CONTEXTO DE INVENTARIO (API REAL): [${
+      hallazgos || "PRODUCTO NO ENCONTRADO O SIN STOCK"
+    }].`;
 
     const messages = [
       { role: "system", content: SYSTEM_PROMPT },
       {
         role: "system",
-        content: `CONTEXTO DE INVENTARIO (API REAL): [${
-          hallazgos || "PRODUCTO NO ENCONTRADO O SIN STOCK"
-        }].`,
+        content: contextPayload,
       },
       { role: "user", content: msg.body },
     ];
 
+    debugLog("PROMPT ENVIADO A GROQ", messages);
+
     const completion = await groq.chat.completions.create({
       messages: messages,
       model: "llama-3.3-70b-versatile",
-      temperature: 0.1, // Bajamos temperatura para evitar alucinaciones con el inventario
+      temperature: 0.1,
       max_tokens: 300,
     });
 
     const respuesta = completion.choices[0].message.content;
 
+    debugLog("RESPUESTA GENERADA POR IA", respuesta || "MENSAJE VACÍO (No se envía)");
+
     if (respuesta.trim() !== "") {
-      await msg.reply(respuesta);
+      if (DEBUG_CONFIG.enabled) {
+        debugLog("ESTADO FINAL", "ENVÍO BLOQUEADO: El modo debug está activo.");
+      } else {
+        await msg.reply(respuesta);
+      }
     }
+
+    if (DEBUG_CONFIG.enabled) {
+      console.log("=========================================================\n");
+    }
+
   } catch (error) {
     console.error("Error en proceso de respuesta:", error);
   }
