@@ -76,20 +76,11 @@ Horario de atención: 9 am a 4 pm de lunes a viernes.
 4. Usa negritas para precios y productos.
 5. Para dudas técnicas o ver fotos, remite al catálogo: https://elyerromenu.com/b/marleta-ferreteria/info#info
 
-### CIERRE DE VENTA (IMPORTANTE) ###
-Cuando el cliente decida comprar o quiera finalizar el pedido, DEBES proporcionarle un enlace de WhatsApp que lo lleve a concretar la compra con el siguiente formato de mensaje precargado (llénalo con la información que tengas del chat):
+### CIERRE DE VENTA ###
+Si el cliente decide comprar o finalizar pedido, responde ÚNICAMENTE con un objeto JSON siguiendo este formato exacto:
+{"finalizar": true, "cliente": "Nombre", "direccion": "Dirección", "pedido": "Producto 1, Producto 2", "total": "Monto total"}
 
-Link: https://wa.me/5352765906?text=urlencoded_message
-
-El mensaje para el link debe seguir este modelo:
-🧰 "Marelta Ferretería" 🔧
-🙎🏻‍♂️Cliente: [Nombre si se conoce]
-📱Teléfono: [Teléfono del cliente]
-📍Dirección: [Dirección si la mencionó]
-🗒️Pedido:
- - [Producto 1]
- - [Producto 2]
-💵 A pagar: [Total estimado]
+Si aún estás en la fase de conversación o asesoría, responde con texto normal de forma profesional.
 
 ### ESPECIFICACIONES TÉCNICAS (USAR SI EL PRODUCTO COINCIDE) ###
 - **Masilla:** Interior, alisar paredes, acabado fino.
@@ -97,11 +88,6 @@ El mensaje para el link debe seguir este modelo:
 - **Cemento P450:** Estructural, saco de 25kg.
 - **Pladur:** 12mm de espesor, planchas de 1.20x2.40.
 - **Pintura Vinil TOR:** Interior y exterior.
-
-### OBJETIVOS COMERCIALES ###
-1. Venta: Prioriza pedidos de mayoreo.
-2. Domicilio: Si preguntan por envío, solicita ubicación exacta.
-3. Proveedores: Si ofrecen mercancía, capta contacto, precio y volumen.
 `;
 
 function normalizarTexto(texto) {
@@ -327,12 +313,43 @@ client.on("message", async (msg) => {
       max_tokens: 300,
     });
 
-    const respuesta = completion.choices[0].message.content;
+    let respuesta = completion.choices[0].message.content;
 
     debugLog(
       "RESPUESTA GENERADA POR IA",
       respuesta || "MENSAJE VACÍO (No se envía)"
     );
+
+    // --- LÓGICA DE PROCESAMIENTO DE CIERRE DE VENTA ---
+    if (respuesta.includes('"finalizar": true')) {
+      try {
+        const datos = JSON.parse(
+          respuesta.substring(
+            respuesta.indexOf("{"),
+            respuesta.lastIndexOf("}") + 1
+          )
+        );
+
+        // Usamos emojis universales simples y la API directa de WhatsApp para mayor estabilidad
+        const plantilla = `🛒 "Marelta Ferretería" 🛠️\n👤 Cliente: ${
+          datos.cliente || "No especificado"
+        }\n📱 Teléfono: ${contact.number}\n📍 Dirección: ${
+          datos.direccion || "No especificada"
+        }\n📋 Pedido:\n - ${datos.pedido
+          .split(", ")
+          .join("\n - ")}\n💵 A pagar: ${datos.total || "Por definir"}`;
+
+        // Cambio a api.whatsapp.com en lugar de wa.me para evitar perdida de codificación en el redireccionamiento
+        const linkWhatsApp = `https://api.whatsapp.com/send?phone=5352765906&text=${encodeURIComponent(
+          plantilla
+        )}`;
+
+        // Agregamos iconos también a la respuesta directa del bot
+        respuesta = `✅ ¡Perfecto! Para concretar su compra, por favor haga clic en el siguiente enlace y envíenos el mensaje pre-cargado:\n\n👉 ${linkWhatsApp}`;
+      } catch (e) {
+        debugLog("ERROR JSON", "No se pudo parsear el objeto de cierre.");
+      }
+    }
 
     if (respuesta.trim() !== "") {
       // Guardar en la memoria (Usuario + Bot)
@@ -346,6 +363,7 @@ client.on("message", async (msg) => {
 
       if (DEBUG_CONFIG.enabled) {
         debugLog("ESTADO FINAL", "ENVÍO BLOQUEADO: El modo debug está activo.");
+        console.log("Respuesta final:", respuesta);
       } else {
         await msg.reply(respuesta);
       }
