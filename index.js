@@ -9,6 +9,10 @@ const path = require("path");
 
 const app = express();
 
+// --- CONFIGURACIÓN DE MEMORIA ---
+const sessions = {}; // Almacena el historial por número de teléfono
+const MAX_HISTORY = 5; // Cantidad de mensajes a recordar
+
 // --- CONFIGURACIÓN DE DEBUG ---
 const DEBUG_CONFIG = {
   enabled: true, // true: muestra logs y BLOQUEA el envío de mensajes. false: funcionamiento normal.
@@ -71,6 +75,21 @@ Horario de atención: 9 am a 4 pm de lunes a viernes.
 3. El servicio de domicilio tiene un COSTO ADICIONAL.
 4. Usa negritas para precios y productos.
 5. Para dudas técnicas o ver fotos, remite al catálogo: https://elyerromenu.com/b/marleta-ferreteria/info#info
+
+### CIERRE DE VENTA (IMPORTANTE) ###
+Cuando el cliente decida comprar o quiera finalizar el pedido, DEBES proporcionarle un enlace de WhatsApp que lo lleve a concretar la compra con el siguiente formato de mensaje precargado (llénalo con la información que tengas del chat):
+
+Link: https://wa.me/5352765906?text=urlencoded_message
+
+El mensaje para el link debe seguir este modelo:
+🧰 "Marelta Ferretería" 🔧
+🙎🏻‍♂️Cliente: [Nombre si se conoce]
+📱Teléfono: [Teléfono del cliente]
+📍Dirección: [Dirección si la mencionó]
+🗒️Pedido:
+ - [Producto 1]
+ - [Producto 2]
+💵 A pagar: [Total estimado]
 
 ### ESPECIFICACIONES TÉCNICAS (USAR SI EL PRODUCTO COINCIDE) ###
 - **Masilla:** Interior, alisar paredes, acabado fino.
@@ -152,14 +171,12 @@ async function buscarEnApi(query) {
     if (!response.ok) throw new Error("Error al conectar con la API");
 
     const productos = await response.json();
-
     const queryNorm = normalizarTexto(query);
     debugLog(
       "NORMALIZACIÓN",
       `Query original: "${query}" -> Normalizado: "${queryNorm}"`
     );
 
-    // Mejoras de búsqueda: Stopwords y palabras clave
     const stopWords = [
       "hola",
       "tienes",
@@ -179,7 +196,6 @@ async function buscarEnApi(query) {
       .map((item) => {
         const nombreNorm = normalizarTexto(item.name);
         const palabrasProducto = nombreNorm.split(/\s+/);
-
         let maxScore = calcularSimilitud(queryNorm, nombreNorm);
         let matchCount = 0;
 
@@ -268,6 +284,8 @@ client.on("message", async (msg) => {
   const contact = await msg.getContact();
   if (contact.isEnterprise) return;
 
+  const sender = msg.from;
+
   try {
     if (DEBUG_CONFIG.enabled) {
       console.log(
@@ -279,7 +297,12 @@ client.on("message", async (msg) => {
       console.log("=========================================================");
     }
 
-    debugLog("MENSAJE RECIBIDO", `De: ${msg.from} - Mensaje: ${msg.body}`);
+    debugLog("MENSAJE RECIBIDO", `De: ${sender} - Mensaje: ${msg.body}`);
+
+    // Inicializar o limpiar historial antiguo
+    if (!sessions[sender]) {
+      sessions[sender] = [];
+    }
 
     const hallazgos = await buscarEnApi(msg.body);
 
@@ -287,16 +310,15 @@ client.on("message", async (msg) => {
       hallazgos || "PRODUCTO NO ENCONTRADO O SIN STOCK"
     }].`;
 
+    // Construir los mensajes incluyendo el historial
     const messages = [
       { role: "system", content: SYSTEM_PROMPT },
-      {
-        role: "system",
-        content: contextPayload,
-      },
+      { role: "system", content: contextPayload },
+      ...sessions[sender], // Insertar los últimos mensajes recordados
       { role: "user", content: msg.body },
     ];
 
-    debugLog("PROMPT ENVIADO A GROQ", messages);
+    debugLog("PROMPT ENVIADO A GROQ (CON MEMORIA)", messages);
 
     const completion = await groq.chat.completions.create({
       messages: messages,
@@ -313,6 +335,15 @@ client.on("message", async (msg) => {
     );
 
     if (respuesta.trim() !== "") {
+      // Guardar en la memoria (Usuario + Bot)
+      sessions[sender].push({ role: "user", content: msg.body });
+      sessions[sender].push({ role: "assistant", content: respuesta });
+
+      // Mantener solo los últimos MAX_HISTORY mensajes (cada interacción son 2 mensajes)
+      if (sessions[sender].length > MAX_HISTORY * 2) {
+        sessions[sender] = sessions[sender].slice(-MAX_HISTORY * 2);
+      }
+
       if (DEBUG_CONFIG.enabled) {
         debugLog("ESTADO FINAL", "ENVÍO BLOQUEADO: El modo debug está activo.");
       } else {
