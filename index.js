@@ -101,6 +101,37 @@ function normalizarTexto(texto) {
     .trim();
 }
 
+// --- FUNCIÓN JARO-WINKLER INTEGRADA ---
+function calcularSimilitud(s1, s2) {
+  if (!s1 || !s2) return 0;
+  if (s1 === s2) return 1;
+  let l1 = s1.length, l2 = s2.length;
+  let range = Math.floor(Math.max(l1, l2) / 2) - 1;
+  let m1 = new Array(l1).fill(false), m2 = new Array(l2).fill(false);
+  let matches = 0;
+  for (let i = 0; i < l1; i++) {
+    let start = Math.max(0, i - range), end = Math.min(i + range + 1, l2);
+    for (let j = start; j < end; j++) {
+      if (!m2[j] && s1[i] === s2[j]) { m1[i] = true; m2[j] = true; matches++; break; }
+    }
+  }
+  if (matches === 0) return 0;
+  let t = 0, k = 0;
+  for (let i = 0; i < l1; i++) {
+    if (m1[i]) {
+      while (!m2[k]) k++;
+      if (s1[i] !== m2[k]) t++;
+      k++;
+    }
+  }
+  let jaro = (matches / l1 + matches / l2 + (matches - t / 2) / matches) / 3;
+  let p = 0;
+  for (let i = 0; i < Math.min(4, l1, l2); i++) {
+    if (s1[i] === s2[i]) p++; else break;
+  }
+  return jaro + p * 0.1 * (1 - jaro);
+}
+
 async function buscarEnApi(query) {
   try {
     debugLog("SOLICITUD API", `Iniciando fetch a: https://marelta.com/productos/`);
@@ -109,35 +140,38 @@ async function buscarEnApi(query) {
 
     const productos = await response.json();
     
-    // --- DEBUG DE RESPUESTA CRUDA ---
-    if (DEBUG_CONFIG.enabled) {
-      debugLog("API DATA RECIBIDA (JSON CRUDO)", JSON.stringify(productos, null, 2).slice(0, 2000) + "... (truncado para lectura)");
-    }
-
     const queryNorm = normalizarTexto(query);
     debugLog("NORMALIZACIÓN", `Query original: "${query}" -> Normalizado: "${queryNorm}"`);
 
-    const palabrasUsuario = queryNorm.split(/\s+/).filter((p) => p.length >= 3);
+    // Mejoras de búsqueda: Stopwords y palabras clave
+    const stopWords = ["hola", "tienes", "vendes", "busco", "quiero", "precio", "cuanto", "vale", "necesito"];
+    const palabrasUsuario = queryNorm.split(/\s+/).filter((p) => p.length >= 3 && !stopWords.includes(p));
 
     const coincidencias = productos
-      .filter((item) => {
-        if (!item.name) return false;
+      .map(item => {
         const nombreNorm = normalizarTexto(item.name);
         const palabrasProducto = nombreNorm.split(/\s+/);
+        
+        let maxScore = calcularSimilitud(queryNorm, nombreNorm);
+        let matchCount = 0;
 
-        if (nombreNorm.length > 2 && queryNorm.includes(nombreNorm))
-          return true;
+        palabrasUsuario.forEach(uP => {
+          let bestWordScore = 0;
+          palabrasProducto.forEach(pP => {
+            const s = calcularSimilitud(uP, pP);
+            if (s > bestWordScore) bestWordScore = s;
+          });
+          if (bestWordScore > 0.85) matchCount++;
+          if (bestWordScore > maxScore) maxScore = bestWordScore;
+        });
 
-        return palabrasUsuario.some((palabra) =>
-          palabrasProducto.includes(palabra)
-        );
+        const finalScore = matchCount > 0 ? Math.max(maxScore, 0.8) : maxScore;
+        return { ...item, score: finalScore };
       })
+      .filter(item => item.score > 0.72) 
+      .sort((a, b) => b.score - a.score)
       .map((item) => {
-        const precioDisplay =
-          item.price_sell_usd > 0
-            ? `${item.price_sell_usd} USD`
-            : `${item.price_sell_cup} CUP`;
-
+        const precioDisplay = item.price_sell_usd > 0 ? `${item.price_sell_usd} USD` : `${item.price_sell_cup} CUP`;
         return `${item.name} - Precio: ${precioDisplay} (Stock: ${item.stock})`;
       });
 
