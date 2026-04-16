@@ -15,7 +15,7 @@ const MAX_HISTORY = 5; // Cantidad de mensajes a recordar
 
 // --- CONFIGURACIÓN DE DEBUG ---
 const DEBUG_CONFIG = {
-  enabled: true, // true: muestra logs y BLOQUEA el envío de mensajes. false: funcionamiento normal.
+  enabled: false, // true: muestra logs y BLOQUEA el envío de mensajes. false: funcionamiento normal.
 };
 
 function debugLog(step, data) {
@@ -75,6 +75,11 @@ Horario de atención: 9 am a 4 pm de lunes a viernes.
 3. El servicio de domicilio tiene un COSTO ADICIONAL.
 4. Usa negritas para precios y productos.
 5. Para dudas técnicas o ver fotos, remite al catálogo: https://elyerromenu.com/b/marleta-ferreteria/info#info
+
+### REGLA DE STOCK E INVENTARIO ###
+- NUNCA menciones la cantidad exacta de productos en stock al cliente en conversaciones normales.
+- Solo debes informar que no hay suficiente cantidad si el cliente solicita una cifra que supera el stock actual disponible en el "CONTEXTO DE INVENTARIO".
+- Si el cliente no pregunta por cantidades o pide una cantidad disponible, confirma la existencia sin decir el número de stock.
 
 ### CIERRE DE VENTA ###
 Si el cliente decide comprar o finalizar pedido, responde ÚNICAMENTE con un objeto JSON siguiendo este formato exacto:
@@ -259,6 +264,7 @@ client.on("ready", () => {
 });
 
 client.on("message", async (msg) => {
+  // Ignorar estados, mensajes propios, grupos y newsletters
   if (
     msg.isStatus ||
     msg.fromMe ||
@@ -266,6 +272,11 @@ client.on("message", async (msg) => {
     msg.from.includes("@newsletter")
   )
     return;
+
+  // FILTRO DE NÚMERO AUTORIZADO (Solo responde a este número)
+  const numeroAutorizado = "280779343003800@lid"; // anthony
+  const numeroAutorizado2 = "77425526444166@lid"; // ossuan
+  if (msg.from !== numeroAutorizado && msg.from !== numeroAutorizado2) return;
 
   const contact = await msg.getContact();
   if (contact.isEnterprise) return;
@@ -292,7 +303,19 @@ client.on("message", async (msg) => {
 
     const hallazgos = await buscarEnApi(msg.body);
 
-    const contextPayload = `CONTEXTO DE INVENTARIO (API REAL): [${
+    // Obtener fecha y hora actual formateada
+    const ahora = new Date();
+    const fechaHoraActual = ahora.toLocaleString("es-ES", {
+      weekday: "long",
+      year: "numeric",
+      month: "long",
+      day: "numeric",
+      hour: "2-digit",
+      minute: "2-digit",
+      second: "2-digit",
+    });
+
+    const contextPayload = `FECHA Y HORA ACTUAL: ${fechaHoraActual}. CONTEXTO DE INVENTARIO (API REAL): [${
       hallazgos || "PRODUCTO NO ENCONTRADO O SIN STOCK"
     }].`;
 
