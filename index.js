@@ -406,12 +406,12 @@ client.on("message", async (msg) => {
         debugLog("ESTADO FINAL", "ENVÍO BLOQUEADO: El modo debug está activo.");
         console.log("Respuesta final:", respuesta);
       } else {
+        const userName = contact.pushname || contact.number;
+        await sendToTelegram(`📩 *De ${userName} (${contact.number}):*\n${msg.body}`);
         await msg.reply(respuesta);
-        await sendToTelegram(`📤 *Marelta dice:*\n${respuesta}`);
+        await sendToTelegram(`📤 *Respuesta a ${userName}:*\n${respuesta}`);
       }
     }
-
-    await sendToTelegram(`📩 *De ${contact.number}:*\n${msg.body}`);
 
     if (DEBUG_CONFIG.enabled) {
       console.log(
