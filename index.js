@@ -82,7 +82,7 @@ const client = new Client({
 
 const SYSTEM_PROMPT = `
 ### ROL Y PERSONALIDAD ###
-Eres el asistente comercial de "Marelta Ferretería". Tu objetivo es vender materiales de construcción.
+Eres el asistente comercial de "Marelta Ferretería". Tu objetivo es vender materiales de construcción, pero puede haber otros productos tambien que no sean de construcción.
 Personalidad: Profesional, directo, eficiente y enfocado en cerrar el negocio.
 Ubicación: Diez de Octubre, Rodríguez 119/ San Indalecio y San Benigno, Santo Suárez, Havana, Cuba.
 Horario de atención: 9 am a 4 pm de lunes a viernes.
@@ -93,6 +93,8 @@ Horario de atención: 9 am a 4 pm de lunes a viernes.
 3. El servicio de domicilio tiene un COSTO ADICIONAL.
 4. Usa negritas para precios y productos.
 5. Para dudas técnicas o ver fotos, remite al catálogo: https://elyerromenu.com/b/marleta-ferreteria/info#info
+6. No menciones promociones, ofertas o descuentos que no estén explícitamente indicados en el "CONTEXTO DE INVENTARIO".
+7. No menciones nunca que vas a generar un enlace de whatsapp ni un json para cerrar la venta. Solo responde con el mensaje final que incluya el enlace si el cliente decide comprar o finalizar pedido.
 
 ### REGLA DE STOCK E INVENTARIO ###
 - NUNCA menciones la cantidad exacta de productos en stock al cliente en conversaciones normales.
@@ -170,56 +172,8 @@ function calcularSimilitud(s1, s2) {
   return jaro + p * 0.1 * (1 - jaro);
 }
 
-function esPreguntaCatalogo(texto) {
-  const preguntasCatalogo = [
-    /que\s+(tienes|vendes|tengo|tengo)\s*(a\s*la\s*venta|disponible|de\s*venta)?/i,
-    /que\s+hay/i,
-    /tienes\s+(algo|productos|materiales)/i,
-    /mostr(a|ame|ame\s*el)\s+(catalogo|productos|lista)/i,
-    /catalogo/i,
-    /ver\s+(productos|materiales|tu|los)\s*(producto|material)/i,
-    /que\s+materiales\s+(tienes|vendes)/i,
-    /menu/i,
-    /lista\s+(de\s*)?(productos|precios)/i,
-  ];
-  return preguntasCatalogo.some((patron) => patron.test(texto));
-}
-
-async function obtenerTodosProductos() {
-  try {
-    const response = await fetch("https://marelta.com/productos/");
-    if (!response.ok) throw new Error("Error al conectar con la API");
-
-    const productos = await response.json();
-    return productos
-      .filter((p) => p.stock > 0)
-      .sort((a, b) => {
-        if (a.price_sell_usd && b.price_sell_usd) return a.price_sell_usd - b.price_sell_usd;
-        return a.price_sell_cup - b.price_sell_cup;
-      })
-      .slice(0, 20)
-      .map((item) => {
-        const precioDisplay =
-          item.price_sell_usd > 0
-            ? `${item.price_sell_usd} USD`
-            : `${item.price_sell_cup} CUP`;
-        return `${item.name} - ${precioDisplay}`;
-      })
-      .join("\n");
-  } catch (error) {
-    console.error("Error obteniendo catálogo:", error);
-    return null;
-  }
-}
-
 async function buscarEnApi(query) {
   try {
-    if (esPreguntaCatalogo(query)) {
-      debugLog("PREGUNTA DE CATÁLOGO", "Detectada pregunta genérica, retornando todo el catálogo");
-      const catalogo = await obtenerTodosProductos();
-      return catalogo;
-    }
-
     debugLog(
       "SOLICITUD API",
       `Iniciando fetch a: https://marelta.com/productos/`
@@ -372,6 +326,7 @@ client.on("message", async (msg) => {
       sessions[sender] = [];
     }
 
+    // Obtener el último producto mencionado en el historial
     const hallazgos = await buscarEnApi(msg.body);
 
     // Obtener fecha y hora actual formateada
@@ -460,7 +415,9 @@ client.on("message", async (msg) => {
         console.log("Respuesta final:", respuesta);
       } else {
         const userName = contact.pushname || contact.number;
-        await sendToTelegram(`📩 *De ${userName} (${contact.number}):*\n${msg.body}`);
+        await sendToTelegram(
+          `📩 *De ${userName} (${contact.number}):*\n${msg.body}`
+        );
         await msg.reply(respuesta);
         await sendToTelegram(`📤 *Respuesta a ${userName}:*\n${respuesta}`);
       }
