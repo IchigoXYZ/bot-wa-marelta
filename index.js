@@ -6,6 +6,7 @@ const QRCode = require("qrcode");
 const fs = require("fs");
 const express = require("express");
 const path = require("path");
+const TelegramBot = require("node-telegram-bot-api");
 
 const app = express();
 
@@ -17,6 +18,23 @@ const MAX_HISTORY = 5; // Cantidad de mensajes a recordar
 const DEBUG_CONFIG = {
   enabled: false, // true: muestra logs y BLOQUEA el envío de mensajes. false: funcionamiento normal.
 };
+
+// --- CONFIGURACIÓN DE TELEGRAM ---
+let telegramBot = null;
+if (process.env.TELEGRAM_TOKEN && process.env.TELEGRAM_CHAT_ID) {
+  telegramBot = new TelegramBot(process.env.TELEGRAM_TOKEN, { polling: false });
+  console.log("✅ Bot de Telegram configurado");
+}
+
+async function sendToTelegram(message) {
+  if (!DEBUG_CONFIG.enabled && telegramBot && process.env.TELEGRAM_CHAT_ID) {
+    try {
+      await telegramBot.sendMessage(process.env.TELEGRAM_CHAT_ID, message);
+    } catch (err) {
+      console.error("Error enviando a Telegram:", err.message);
+    }
+  }
+}
 
 function debugLog(step, data) {
   if (DEBUG_CONFIG.enabled) {
@@ -389,8 +407,11 @@ client.on("message", async (msg) => {
         console.log("Respuesta final:", respuesta);
       } else {
         await msg.reply(respuesta);
+        await sendToTelegram(`📤 *Marelta dice:*\n${respuesta}`);
       }
     }
+
+    await sendToTelegram(`📩 *De ${contact.number}:*\n${msg.body}`);
 
     if (DEBUG_CONFIG.enabled) {
       console.log(
