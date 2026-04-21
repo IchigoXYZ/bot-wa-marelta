@@ -170,8 +170,56 @@ function calcularSimilitud(s1, s2) {
   return jaro + p * 0.1 * (1 - jaro);
 }
 
+function esPreguntaCatalogo(texto) {
+  const preguntasCatalogo = [
+    /que\s+(tienes|vendes|tengo|tengo)\s*(a\s*la\s*venta|disponible|de\s*venta)?/i,
+    /que\s+hay/i,
+    /tienes\s+(algo|productos|materiales)/i,
+    /mostr(a|ame|ame\s*el)\s+(catalogo|productos|lista)/i,
+    /catalogo/i,
+    /ver\s+(productos|materiales|tu|los)\s*(producto|material)/i,
+    /que\s+materiales\s+(tienes|vendes)/i,
+    /menu/i,
+    /lista\s+(de\s*)?(productos|precios)/i,
+  ];
+  return preguntasCatalogo.some((patron) => patron.test(texto));
+}
+
+async function obtenerTodosProductos() {
+  try {
+    const response = await fetch("https://marelta.com/productos/");
+    if (!response.ok) throw new Error("Error al conectar con la API");
+
+    const productos = await response.json();
+    return productos
+      .filter((p) => p.stock > 0)
+      .sort((a, b) => {
+        if (a.price_sell_usd && b.price_sell_usd) return a.price_sell_usd - b.price_sell_usd;
+        return a.price_sell_cup - b.price_sell_cup;
+      })
+      .slice(0, 20)
+      .map((item) => {
+        const precioDisplay =
+          item.price_sell_usd > 0
+            ? `${item.price_sell_usd} USD`
+            : `${item.price_sell_cup} CUP`;
+        return `${item.name} - ${precioDisplay}`;
+      })
+      .join("\n");
+  } catch (error) {
+    console.error("Error obteniendo catálogo:", error);
+    return null;
+  }
+}
+
 async function buscarEnApi(query) {
   try {
+    if (esPreguntaCatalogo(query)) {
+      debugLog("PREGUNTA DE CATÁLOGO", "Detectada pregunta genérica, retornando todo el catálogo");
+      const catalogo = await obtenerTodosProductos();
+      return catalogo;
+    }
+
     debugLog(
       "SOLICITUD API",
       `Iniciando fetch a: https://marelta.com/productos/`
@@ -200,6 +248,11 @@ async function buscarEnApi(query) {
     const palabrasUsuario = queryNorm
       .split(/\s+/)
       .filter((p) => p.length >= 3 && !stopWords.includes(p));
+
+    if (palabrasUsuario.length === 0) {
+      const catalogo = await obtenerTodosProductos();
+      return catalogo;
+    }
 
     const coincidencias = productos
       .map((item) => {
