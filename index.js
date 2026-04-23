@@ -76,7 +76,7 @@ const puppeteerConfig = {
 console.log(`💻 Sistema detectado: ${isWindows ? "Windows" : "Linux/Railway"}`);
 
 const client = new Client({
-  authStrategy: new LocalAuth(),
+  authStrategy: new LocalAuth({ dataPath: '/app/data' }), // <-- ÚNICA MODIFICACIÓN: Ruta específica para el volumen
   puppeteer: puppeteerConfig,
 });
 

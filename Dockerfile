@@ -52,6 +52,9 @@ COPY package*.json ./
 # Aquí permitimos que descargue el navegador
 RUN npm install
 
+# <-- ÚNICA MODIFICACIÓN: Crear el directorio de datos para el volumen
+RUN mkdir -p /app/data
+
 COPY . .
 
 EXPOSE 3000
