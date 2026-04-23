@@ -93,19 +93,20 @@ Horario de atención: 9 am a 4 pm de lunes a viernes.
 3. El servicio de domicilio tiene un COSTO ADICIONAL.
 4. Usa negritas para precios y productos.
 5. Para dudas técnicas o ver fotos, remite al catálogo: https://elyerromenu.com/b/marleta-ferreteria/info#info
-6. No menciones promociones, ofertas o descuentos que no estén explícitamente indicados en el "CONTEXTO DE INVENTARIO".
-7. No menciones nunca que vas a generar un enlace de whatsapp ni un json para cerrar la venta. Solo responde con el mensaje final que incluya el enlace si el cliente decide comprar o finalizar pedido.
 
 ### REGLA DE STOCK E INVENTARIO ###
 - NUNCA menciones la cantidad exacta de productos en stock al cliente en conversaciones normales.
 - Solo debes informar que no hay suficiente cantidad si el cliente solicita una cifra que supera el stock actual disponible en el "CONTEXTO DE INVENTARIO".
 - Si el cliente no pregunta por cantidades o pide una cantidad disponible, confirma la existencia sin decir el número de stock.
+- Tienes acceso a precios unitarios y precios mayoristas en USD y CUP. Informa el precio mayorista solo si el cliente pide cantidades iguales o superiores al mínimo requerido o si pregunta por descuentos/compras al por mayor.
 
 ### CIERRE DE VENTA ###
-Si el cliente decide comprar o finalizar pedido, responde ÚNICAMENTE con un objeto JSON siguiendo este formato exacto:
+- ANTES de confirmar el pedido, DEBES solicitar al cliente su nombre y dirección para la entrega o recogida si aún no los ha proporcionado.
+- NO generes el objeto JSON hasta que el cliente haya proporcionado explícitamente su nombre y dirección.
+- Solo cuando el cliente confirme su compra Y tengas su nombre y dirección, responde ÚNICAMENTE con un objeto JSON siguiendo este formato exacto:
 {"finalizar": true, "cliente": "Nombre", "direccion": "Dirección", "pedido": "Producto 1, Producto 2", "total": "Monto total"}
 
-Si aún estás en la fase de conversación o asesoría, responde con texto normal de forma profesional.
+Si aún estás en la fase de conversación, asesoría, o pidiendo los datos del cliente, responde con texto normal de forma profesional.
 
 ### ESPECIFICACIONES TÉCNICAS (USAR SI EL PRODUCTO COINCIDE) ###
 - **Masilla:** Interior, alisar paredes, acabado fino.
@@ -203,11 +204,6 @@ async function buscarEnApi(query) {
       .split(/\s+/)
       .filter((p) => p.length >= 3 && !stopWords.includes(p));
 
-    if (palabrasUsuario.length === 0) {
-      const catalogo = await obtenerTodosProductos();
-      return catalogo;
-    }
-
     const coincidencias = productos
       .map((item) => {
         const nombreNorm = normalizarTexto(item.name);
@@ -231,11 +227,20 @@ async function buscarEnApi(query) {
       .filter((item) => item.score > 0.72)
       .sort((a, b) => b.score - a.score)
       .map((item) => {
-        const precioDisplay =
-          item.price_sell_usd > 0
-            ? `${item.price_sell_usd} USD`
-            : `${item.price_sell_cup} CUP`;
-        return `${item.name} - Precio: ${precioDisplay} (Stock: ${item.stock})`;
+        // Formatear la información extendida del producto para el bot
+        const precioNormal = `${item.price_sell_usd} USD / ${item.price_sell_cup} CUP`;
+        let mayoristaInfo = "";
+        
+        if (item.mayorista_min_qty > 0) {
+            mayoristaInfo = ` | Mayorista (desde ${item.mayorista_min_qty} unid): ${item.price_sell_mayorista_usd} USD / ${item.price_sell_mayorista_cup} CUP`;
+        }
+        
+        let detallesInfo = "";
+        if (item.detalles && item.detalles.trim() !== "") {
+            detallesInfo = ` | Detalles: ${item.detalles}`;
+        }
+
+        return `${item.name} - Precio: ${precioNormal}${mayoristaInfo} (Stock: ${item.stock})${detallesInfo}`;
       });
 
     debugLog(
@@ -299,9 +304,9 @@ client.on("message", async (msg) => {
     return;
 
   // FILTRO DE NÚMERO AUTORIZADO (Solo responde a este número)
-  const numeroAutorizado = "280779343003800@lid"; // anthony
-  const numeroAutorizado2 = "77425526444166@lid"; // ossuan
-  if (msg.from !== numeroAutorizado && msg.from !== numeroAutorizado2) return;
+  // const numeroAutorizado = "280779343003800@lid"; // anthony
+  // const numeroAutorizado2 = "77425526444166@lid"; // ossuan
+  // if (msg.from !== numeroAutorizado && msg.from !== numeroAutorizado2) return;
 
   const contact = await msg.getContact();
   if (contact.isEnterprise) return;
@@ -326,10 +331,18 @@ client.on("message", async (msg) => {
       sessions[sender] = [];
     }
 
-    // Obtener el último producto mencionado en el historial
-    const hallazgos = await buscarEnApi(msg.body);
+    // --- LÓGICA DE BÚSQUEDA MEJORADA CON MEMORIA ---
+    let hallazgos = await buscarEnApi(msg.body);
 
-    // Obtener fecha y hora actual formateada
+    // Si no hay hallazgos con el mensaje actual, intentamos buscar con el historial
+    if (!hallazgos && sessions[sender].length > 0) {
+      debugLog("MEMORIA", "Buscando contexto en el historial completo (usuario + bot)...");
+      const contextoAnterior = sessions[sender]
+        .map((m) => m.content)
+        .join(" ");
+      hallazgos = await buscarEnApi(contextoAnterior);
+    }
+
     const ahora = new Date();
     const fechaHoraActual = ahora.toLocaleString("es-ES", {
       weekday: "long",
@@ -389,7 +402,7 @@ client.on("message", async (msg) => {
           .join("\n - ")}\n💵 A pagar: ${datos.total || "Por definir"}`;
 
         // Cambio a api.whatsapp.com en lugar de wa.me para evitar perdida de codificación en el redireccionamiento
-        const linkWhatsApp = `https://api.whatsapp.com/send?phone=5352765906&text=${encodeURIComponent(
+        const linkWhatsApp = `https://api.whatsapp.com/send?phone=5355102257&text=${encodeURIComponent(
           plantilla
         )}`;
 
