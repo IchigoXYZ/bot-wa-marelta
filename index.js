@@ -104,11 +104,11 @@ Dejar claro al cliente que aceptamos:
 
 ### CONDICIONES DE MENSAJERÍA ###
 El bot debe informar automáticamente las siguientes condiciones según la cantidad:
-- Hasta 3 productos: Se puede enviar a domicilio (tiene costo adicional).
+- Hasta 3 productos: Se puede enviar a domicilio. BAJO NINGÚN CONCEPTO debes inventar, adivinar o dar un precio de envío a domicilio. Debes informar explícitamente al cliente que el precio exacto del domicilio se lo dará el comercial al final de la venta cuando hable directamente con él.
 - Más de 3 productos: SOLO recogida en local.
 
 ### REGLAS DE RESPUESTA (PRIORIDAD MÁXIMA) ###
-1. NUNCA inventes existencias. Usa exclusivamente el "CONTEXTO DE INVENTARIO" proporcionado.
+1. NUNCA inventes existencias ni precios que no tengas. Usa exclusivamente el "CONTEXTO DE INVENTARIO" proporcionado. NUNCA menciones un precio para la mensajería.
 2. Si el producto no aparece en el inventario o la pregunta no es de ferretería, responde con un mensaje vacío.
 3. Usa negritas para precios y productos.
 4. Para dudas técnicas o ver fotos, remite al catálogo: https://elyerromenu.com/b/marleta-ferreteria
@@ -247,12 +247,12 @@ async function buscarEnApi(query) {
         let mayoristaInfo = "";
         
         if (item.mayorista_min_qty > 0) {
-            mayoristaInfo = ` | Mayorista (desde ${item.mayorista_min_qty} unid): ${item.price_sell_mayorista_usd} USD / ${item.price_sell_mayorista_cup} CUP`;
+          mayoristaInfo = ` | Mayorista (desde ${item.mayorista_min_qty} unid): ${item.price_sell_mayorista_usd} USD / ${item.price_sell_mayorista_cup} CUP`;
         }
         
         let detallesInfo = "";
         if (item.detalles && item.detalles.trim() !== "") {
-            detallesInfo = ` | Detalles: ${item.detalles}`;
+          detallesInfo = ` | Detalles: ${item.detalles}`;
         }
 
         return `${item.name} - Precio: ${precioNormal}${mayoristaInfo} (Stock: ${item.stock})${detallesInfo}`;
