@@ -87,12 +87,23 @@ Personalidad: Profesional, directo, eficiente y enfocado en cerrar el negocio.
 Ubicación: Diez de Octubre, Rodríguez 119/ San Indalecio y San Benigno, Santo Suárez, Havana, Cuba.
 Horario de atención: 9 am a 4 pm de lunes a viernes.
 
+### MÉTODOS DE PAGO ###
+Dejar claro al cliente que aceptamos:
+- Moneda nacional (Efectivo)
+- USD (Efectivo)
+- Euro (Efectivo)
+- Transferencia (ACLARACIÓN: Las transferencias son de hasta el 30% del total según el monto. El resto se paga en el local).
+
+### CONDICIONES DE MENSAJERÍA ###
+El bot debe informar automáticamente las siguientes condiciones según la cantidad:
+- Hasta 3 productos: Se puede enviar a domicilio (tiene costo adicional).
+- Más de 3 productos: SOLO recogida en local.
+
 ### REGLAS DE RESPUESTA (PRIORIDAD MÁXIMA) ###
 1. NUNCA inventes existencias. Usa exclusivamente el "CONTEXTO DE INVENTARIO" proporcionado.
 2. Si el producto no aparece en el inventario o la pregunta no es de ferretería, responde con un mensaje vacío.
-3. El servicio de domicilio tiene un COSTO ADICIONAL.
-4. Usa negritas para precios y productos.
-5. Para dudas técnicas o ver fotos, remite al catálogo: https://elyerromenu.com/b/marleta-ferreteria/info#info
+3. Usa negritas para precios y productos.
+4. Para dudas técnicas o ver fotos, remite al catálogo: https://elyerromenu.com/b/marleta-ferreteria
 
 ### REGLA DE STOCK E INVENTARIO ###
 - NUNCA menciones la cantidad exacta de productos en stock al cliente en conversaciones normales.
@@ -100,20 +111,16 @@ Horario de atención: 9 am a 4 pm de lunes a viernes.
 - Si el cliente no pregunta por cantidades o pide una cantidad disponible, confirma la existencia sin decir el número de stock.
 - Tienes acceso a precios unitarios y precios mayoristas en USD y CUP. Informa el precio mayorista solo si el cliente pide cantidades iguales o superiores al mínimo requerido o si pregunta por descuentos/compras al por mayor.
 
-### CIERRE DE VENTA ###
-- ANTES de confirmar el pedido, DEBES solicitar al cliente su nombre y dirección para la entrega o recogida si aún no los ha proporcionado.
-- NO generes el objeto JSON hasta que el cliente haya proporcionado explícitamente su nombre y dirección.
-- Solo cuando el cliente confirme su compra Y tengas su nombre y dirección, responde ÚNICAMENTE con un objeto JSON siguiendo este formato exacto:
-{"finalizar": true, "cliente": "Nombre", "direccion": "Dirección", "pedido": "Producto 1, Producto 2", "total": "Monto total"}
+### CIERRE DE VENTA Y PAGO ANTICIPADO (30%) ###
+- Cuando el cliente quiera comprar, DEBES solicitar PRIMERO su nombre.
+- Una vez te dé su nombre, envía un mensaje automático exacto con este formato para el anticipo:
+  "Perfecto, [Nombre del cliente] 🙌 Puedes asegurar tu mercancía con un anticipo del 30% 💳\\n📌 Tarjeta: 9212 9598 7166 1908\\n📲 Envíanos el comprobante por este chat para confirmar." (Aclara que el resto se paga en el local).
+- Diferencia correctamente el método de entrega (Entrega a domicilio o Recogida en tienda).
+- NO generes el objeto JSON hasta que el cliente haya proporcionado su nombre, confirmado el pago y la dirección (si aplica domicilio).
+- Solo al confirmar, responde ÚNICAMENTE con un objeto JSON siguiendo este formato exacto:
+{"finalizar": true, "cliente": "Nombre", "metodo_entrega": "Entrega a domicilio / Recogida en tienda", "direccion": "Dirección o N/A", "pedido": "Producto 1, Producto 2", "total": "Monto total"}
 
-Si aún estás en la fase de conversación, asesoría, o pidiendo los datos del cliente, responde con texto normal de forma profesional.
-
-### ESPECIFICACIONES TÉCNICAS (USAR SI EL PRODUCTO COINCIDE) ###
-- **Masilla:** Interior, alisar paredes, acabado fino.
-- **Pasta de juntas:** Rellenar rajaduras e imperfecciones.
-- **Cemento P450:** Estructural, saco de 25kg.
-- **Pladur:** 12mm de espesor, planchas de 1.20x2.40.
-- **Pintura Vinil TOR:** Interior y exterior.
+Si aún estás en la fase de conversación, asesoría, o pidiendo los datos, responde con texto normal de forma profesional.
 `;
 
 function normalizarTexto(texto) {
@@ -314,6 +321,24 @@ client.on("message", async (msg) => {
   const sender = msg.from;
 
   try {
+    // 1. MANEJO DE AUDIOS
+    if (msg.hasMedia && (msg.type === "ptt" || msg.type === "audio")) {
+      await msg.reply("Para poder ayudarte mejor, por favor escríbenos tu consulta ✍️🙏");
+      return; // Detenemos la ejecución aquí
+    }
+
+    // 2. ATENCIÓN HUMANA
+    const msgTextoNormalizado = normalizarTexto(msg.body);
+    const humanKeywords = ["humano", "persona", "vendedor", "comercial", "asesor"];
+    if (humanKeywords.some((kw) => msgTextoNormalizado.includes(kw))) {
+      await msg.reply("Un comercial te contactará a la brevedad 📲✨ Puedes seguir consultando por aquí mientras tanto.");
+      
+      // Enviar notificación a Telegram (como sistema de registro/alerta centralizado)
+      const userName = contact.pushname || contact.number;
+      await sendToTelegram(`🚨 *ALERTA DE ATENCIÓN HUMANA*\nEl cliente ${userName} (${contact.number}) ha solicitado hablar con un vendedor.\nMensaje: "${msg.body}"`);
+      return; // Detenemos la ejecución para que el bot no intente responder al pedido de ayuda humana
+    }
+
     if (DEBUG_CONFIG.enabled) {
       console.log(
         "\n========================================================="
@@ -392,11 +417,13 @@ client.on("message", async (msg) => {
           )
         );
 
-        // Usamos emojis universales simples y la API directa de WhatsApp para mayor estabilidad
+        // Actualizamos la plantilla para reflejar "método de entrega" y ocultar "dirección de recogida"
         const plantilla = `🛒 "Marelta Ferretería" 🛠️\n👤 Cliente: ${
           datos.cliente || "No especificado"
-        }\n📱 Teléfono: ${contact.number}\n📍 Dirección: ${
-          datos.direccion || "No especificada"
+        }\n📱 Teléfono: ${contact.number}\n📍 Entrega: ${
+          datos.metodo_entrega || "No especificada"
+        }\n📍 Dirección: ${
+          datos.direccion || "N/A"
         }\n📋 Pedido:\n - ${datos.pedido
           .split(", ")
           .join("\n - ")}\n💵 A pagar: ${datos.total || "Por definir"}`;
