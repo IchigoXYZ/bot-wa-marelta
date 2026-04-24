@@ -44,9 +44,17 @@ function debugLog(step, data) {
   }
 }
 
-const groq = new Groq({
+// --- MODIFICACIÓN: INSTANCIAS DE GROQ Y VARIABLE DE ALTERNANCIA ---
+const groq1 = new Groq({
   apiKey: process.env.GROQ_API_KEY,
 });
+
+const groq2 = new Groq({
+  apiKey: process.env.GROQ_API_KEY_2,
+});
+
+let useFirstGroqKey = true; // Variable para alternar las llamadas
+// ------------------------------------------------------------------
 
 const isWindows = process.platform === "win32";
 
@@ -114,7 +122,7 @@ El bot debe informar automáticamente las siguientes condiciones según la canti
 ### CIERRE DE VENTA Y PAGO ANTICIPADO (30%) ###
 - Cuando el cliente quiera comprar, DEBES solicitar PRIMERO su nombre.
 - Una vez te dé su nombre, envía un mensaje automático exacto con este formato para el anticipo:
-  "Perfecto, [Nombre del cliente] 🙌 Puedes asegurar tu mercancía con un anticipo del 30% 💳\\n📌 Tarjeta: 9212 9598 7166 1908\\n📲 Envíanos el comprobante por este chat para confirmar." (Aclara que el resto se paga en el local).
+  "Perfecto, [Nombre del cliente] 🙌 Puedes asegurar tu mercancía con un anticipo del 30% 💳\n📌 Tarjeta: 9212 9598 7166 1908\n📲 Envíanos el comprobante por este chat para confirmar." (Aclara que el resto se paga en el local).
 - Diferencia correctamente el método de entrega (Entrega a domicilio o Recogida en tienda).
 - NO generes el objeto JSON hasta que el cliente haya proporcionado su nombre, confirmado el pago y la dirección (si aplica domicilio).
 - Solo al confirmar, responde ÚNICAMENTE con un objeto JSON siguiendo este formato exacto:
@@ -393,12 +401,17 @@ client.on("message", async (msg) => {
 
     debugLog("PROMPT ENVIADO A GROQ (CON MEMORIA)", messages);
 
-    const completion = await groq.chat.completions.create({
+    // --- MODIFICACIÓN: INTERCALAR API KEYS PARA LA LLAMADA ---
+    const currentGroq = useFirstGroqKey ? groq1 : groq2;
+    useFirstGroqKey = !useFirstGroqKey; // Alterna para el próximo mensaje
+
+    const completion = await currentGroq.chat.completions.create({
       messages: messages,
       model: "llama-3.3-70b-versatile",
       temperature: 0.1,
       max_tokens: 300,
     });
+    // -----------------------------------------------------------
 
     let respuesta = completion.choices[0].message.content;
 
