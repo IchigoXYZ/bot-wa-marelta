@@ -10,6 +10,15 @@ const TelegramBot = require("node-telegram-bot-api");
 
 const app = express();
 
+// --- MANEJO GLOBAL DE ERRORES PARA EVITAR CAÍDAS SILENCIOSAS ---
+process.on("uncaughtException", (err) => {
+  console.error("🔥 Excepción no capturada:", err);
+});
+
+process.on("unhandledRejection", (reason, promise) => {
+  console.error("⚠️ Rechazo de promesa no manejado:", reason);
+});
+
 // --- CONFIGURACIÓN DE MEMORIA ---
 const sessions = {}; // Almacena el historial por número de teléfono
 const MAX_HISTORY = 5; // Cantidad de mensajes a recordar
@@ -84,7 +93,7 @@ const puppeteerConfig = {
 console.log(`💻 Sistema detectado: ${isWindows ? "Windows" : "Linux/Railway"}`);
 
 const client = new Client({
-  authStrategy: new LocalAuth({ dataPath: '/app/data' }), // <-- ÚNICA MODIFICACIÓN: Ruta específica para el volumen
+  authStrategy: new LocalAuth({ dataPath: "/app/data" }), // <-- ÚNICA MODIFICACIÓN: Ruta específica para el volumen
   puppeteer: puppeteerConfig,
 });
 
@@ -243,11 +252,11 @@ async function buscarEnApi(query) {
         // Formatear la información extendida del producto para el bot
         const precioNormal = `${item.price_sell_usd} USD / ${item.price_sell_cup} CUP`;
         let mayoristaInfo = "";
-        
+
         if (item.mayorista_min_qty > 0) {
           mayoristaInfo = ` | Mayorista (desde ${item.mayorista_min_qty} unid): ${item.price_sell_mayorista_usd} USD / ${item.price_sell_mayorista_cup} CUP`;
         }
-        
+
         let detallesInfo = "";
         if (item.detalles && item.detalles.trim() !== "") {
           detallesInfo = ` | Detalles: ${item.detalles}`;
@@ -306,6 +315,15 @@ client.on("ready", () => {
   }
 });
 
+// --- MANEJO DE DESCONEXIÓN (SELF-HEALING PARA RAILWAY) ---
+client.on("disconnected", (reason) => {
+  console.log("⚠️ Cliente de WhatsApp desconectado. Razón:", reason);
+  console.log(
+    "🔄 Cerrando el proceso para que Railway lo reinicie automáticamente..."
+  );
+  process.exit(1);
+});
+
 client.on("message", async (msg) => {
   // Ignorar estados, mensajes propios, grupos y newsletters
   if (
@@ -329,19 +347,31 @@ client.on("message", async (msg) => {
   try {
     // 1. MANEJO DE AUDIOS
     if (msg.hasMedia && (msg.type === "ptt" || msg.type === "audio")) {
-      await msg.reply("Para poder ayudarte mejor, por favor escríbenos tu consulta ✍️🙏");
+      await msg.reply(
+        "Para poder ayudarte mejor, por favor escríbenos tu consulta ✍️🙏"
+      );
       return; // Detenemos la ejecución aquí
     }
 
     // 2. ATENCIÓN HUMANA
     const msgTextoNormalizado = normalizarTexto(msg.body);
-    const humanKeywords = ["humano", "persona", "vendedor", "comercial", "asesor"];
+    const humanKeywords = [
+      "humano",
+      "persona",
+      "vendedor",
+      "comercial",
+      "asesor",
+    ];
     if (humanKeywords.some((kw) => msgTextoNormalizado.includes(kw))) {
-      await msg.reply("Un comercial te contactará a la brevedad 📲✨ Puedes seguir consultando por aquí mientras tanto.");
-      
+      await msg.reply(
+        "Un comercial te contactará a la brevedad 📲✨ Puedes seguir consultando por aquí mientras tanto."
+      );
+
       // Enviar notificación a Telegram (como sistema de registro/alerta centralizado)
       const userName = contact.pushname || contact.number;
-      await sendToTelegram(`🚨 *ALERTA DE ATENCIÓN HUMANA*\nEl cliente ${userName} (${contact.number}) ha solicitado hablar con un vendedor.\nMensaje: "${msg.body}"`);
+      await sendToTelegram(
+        `🚨 *ALERTA DE ATENCIÓN HUMANA*\nEl cliente ${userName} (${contact.number}) ha solicitado hablar con un vendedor.\nMensaje: "${msg.body}"`
+      );
       return; // Detenemos la ejecución para que el bot no intente responder al pedido de ayuda humana
     }
 
@@ -367,10 +397,11 @@ client.on("message", async (msg) => {
 
     // Si no hay hallazgos con el mensaje actual, intentamos buscar con el historial
     if (!hallazgos && sessions[sender].length > 0) {
-      debugLog("MEMORIA", "Buscando contexto en el historial completo (usuario + bot)...");
-      const contextoAnterior = sessions[sender]
-        .map((m) => m.content)
-        .join(" ");
+      debugLog(
+        "MEMORIA",
+        "Buscando contexto en el historial completo (usuario + bot)..."
+      );
+      const contextoAnterior = sessions[sender].map((m) => m.content).join(" ");
       hallazgos = await buscarEnApi(contextoAnterior);
     }
 
@@ -483,6 +514,7 @@ client.on("message", async (msg) => {
     console.error("Error en proceso de respuesta:", error);
   }
 
+  // Ahora esto sí funcionará gracias a --expose-gc en el package.json
   if (global.gc) {
     global.gc();
   }
