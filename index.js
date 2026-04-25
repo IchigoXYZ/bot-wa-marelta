@@ -13,10 +13,18 @@ const app = express();
 // --- MANEJO GLOBAL DE ERRORES PARA EVITAR CAÍDAS SILENCIOSAS ---
 process.on("uncaughtException", (err) => {
   console.error("🔥 Excepción no capturada:", err);
+  process.exit(1); // <-- MODIFICACIÓN: Forzar reinicio en caso de error fatal
 });
 
 process.on("unhandledRejection", (reason, promise) => {
   console.error("⚠️ Rechazo de promesa no manejado:", reason);
+  // <-- MODIFICACIÓN: Si es el error de contexto destruido, reiniciamos el contenedor
+  if (reason && reason.toString().includes("Execution context was destroyed")) {
+    console.log(
+      "🔄 Reiniciando proceso por error de contexto de Puppeteer para que Railway lo levante de nuevo..."
+    );
+    process.exit(1);
+  }
 });
 
 // --- CONFIGURACIÓN DE MEMORIA ---
@@ -520,4 +528,8 @@ client.on("message", async (msg) => {
   }
 });
 
-client.initialize();
+// <-- MODIFICACIÓN: Capturar el error directamente en la inicialización para forzar reinicio
+client.initialize().catch((err) => {
+  console.error("❌ Error fatal al inicializar el bot:", err);
+  process.exit(1);
+});
