@@ -10,15 +10,20 @@ const TelegramBot = require("node-telegram-bot-api");
 
 const app = express();
 
+// --- NUEVO: FUNCIONES DE RETRASO PARA HUMANIZAR EL BOT ---
+const delay = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+const randomDelay = (min, max) =>
+  Math.floor(Math.random() * (max - min + 1) + min);
+// ---------------------------------------------------------
+
 // --- MANEJO GLOBAL DE ERRORES PARA EVITAR CAÍDAS SILENCIOSAS ---
 process.on("uncaughtException", (err) => {
   console.error("🔥 Excepción no capturada:", err);
-  process.exit(1); // <-- MODIFICACIÓN: Forzar reinicio en caso de error fatal
+  process.exit(1);
 });
 
 process.on("unhandledRejection", (reason, promise) => {
   console.error("⚠️ Rechazo de promesa no manejado:", reason);
-  // <-- MODIFICACIÓN: Si es el error de contexto destruido, reiniciamos el contenedor
   if (reason && reason.toString().includes("Execution context was destroyed")) {
     console.log(
       "🔄 Reiniciando proceso por error de contexto de Puppeteer para que Railway lo levante de nuevo..."
@@ -28,12 +33,12 @@ process.on("unhandledRejection", (reason, promise) => {
 });
 
 // --- CONFIGURACIÓN DE MEMORIA ---
-const sessions = {}; // Almacena el historial por número de teléfono
-const MAX_HISTORY = 5; // Cantidad de mensajes a recordar
+const sessions = {};
+const MAX_HISTORY = 5;
 
 // --- CONFIGURACIÓN DE DEBUG ---
 const DEBUG_CONFIG = {
-  enabled: false, // true: muestra logs y BLOQUEA el envío de mensajes. false: funcionamiento normal.
+  enabled: false,
 };
 
 // --- CONFIGURACIÓN DE TELEGRAM ---
@@ -61,7 +66,7 @@ function debugLog(step, data) {
   }
 }
 
-// --- MODIFICACIÓN: INSTANCIAS DE GROQ Y VARIABLE DE ALTERNANCIA ---
+// --- INSTANCIAS DE GROQ Y VARIABLE DE ALTERNANCIA ---
 const groq1 = new Groq({
   apiKey: process.env.GROQ_API_KEY,
 });
@@ -70,7 +75,7 @@ const groq2 = new Groq({
   apiKey: process.env.GROQ_API_KEY_2,
 });
 
-let useFirstGroqKey = true; // Variable para alternar las llamadas
+let useFirstGroqKey = true;
 // ------------------------------------------------------------------
 
 const isWindows = process.platform === "win32";
@@ -101,7 +106,7 @@ const puppeteerConfig = {
 console.log(`💻 Sistema detectado: ${isWindows ? "Windows" : "Linux/Railway"}`);
 
 const client = new Client({
-  authStrategy: new LocalAuth({ dataPath: "/app/data" }), // <-- ÚNICA MODIFICACIÓN: Ruta específica para el volumen
+  authStrategy: new LocalAuth({ dataPath: "/app/data" }),
   puppeteer: puppeteerConfig,
 });
 
@@ -275,9 +280,7 @@ async function buscarEnApi(query) {
 
     debugLog(
       "FILTRADO DE COINCIDENCIAS",
-      coincidencias.length > 0
-        ? coincidencias
-        : "No se encontraron productos tras filtrar"
+      coincidencias.length > 0 ? coincidencias : "No se encontraron productos"
     );
 
     return coincidencias.length > 0
@@ -351,15 +354,26 @@ client.on("message", async (msg) => {
   if (contact.isEnterprise) return;
 
   const sender = msg.from;
+  const chat = await msg.getChat(); // <-- NUEVO: Instanciamos el chat para enviar estados visuales
 
   try {
     // 1. MANEJO DE AUDIOS
     if (msg.hasMedia && (msg.type === "ptt" || msg.type === "audio")) {
+      // --- NUEVO: Retraso artificial antes de contestar al audio ---
+      await delay(randomDelay(1500, 3000));
+      await chat.sendStateTyping();
+      await delay(randomDelay(2000, 4000));
+      await chat.clearState();
+
       await msg.reply(
         "Para poder ayudarte mejor, por favor escríbenos tu consulta ✍️🙏"
       );
-      return; // Detenemos la ejecución aquí
+      return;
     }
+
+    // --- NUEVO: SIMULAR TIEMPO DE "LECTURA" HUMANA ---
+    // Un humano tarda unos segundos en agarrar el teléfono, abrir la notificación y leer.
+    await delay(randomDelay(1500, 3500));
 
     // 2. ATENCIÓN HUMANA
     const msgTextoNormalizado = normalizarTexto(msg.body);
@@ -371,6 +385,10 @@ client.on("message", async (msg) => {
       "asesor",
     ];
     if (humanKeywords.some((kw) => msgTextoNormalizado.includes(kw))) {
+      await chat.sendStateTyping();
+      await delay(randomDelay(2000, 4000));
+      await chat.clearState();
+
       await msg.reply(
         "Un comercial te contactará a la brevedad 📲✨ Puedes seguir consultando por aquí mientras tanto."
       );
@@ -428,19 +446,18 @@ client.on("message", async (msg) => {
       hallazgos || "PRODUCTO NO ENCONTRADO O SIN STOCK"
     }].`;
 
-    // Construir los mensajes incluyendo el historial
     const messages = [
       { role: "system", content: SYSTEM_PROMPT },
       { role: "system", content: contextPayload },
-      ...sessions[sender], // Insertar los últimos mensajes recordados
+      ...sessions[sender],
       { role: "user", content: msg.body },
     ];
 
-    debugLog("PROMPT ENVIADO A GROQ (CON MEMORIA)", messages);
+    debugLog("PROMPT ENVIADO A GROQ", messages);
 
     // --- MODIFICACIÓN: INTERCALAR API KEYS PARA LA LLAMADA ---
     const currentGroq = useFirstGroqKey ? groq1 : groq2;
-    useFirstGroqKey = !useFirstGroqKey; // Alterna para el próximo mensaje
+    useFirstGroqKey = !useFirstGroqKey;
 
     const completion = await currentGroq.chat.completions.create({
       messages: messages,
@@ -452,10 +469,7 @@ client.on("message", async (msg) => {
 
     let respuesta = completion.choices[0].message.content;
 
-    debugLog(
-      "RESPUESTA GENERADA POR IA",
-      respuesta || "MENSAJE VACÍO (No se envía)"
-    );
+    debugLog("RESPUESTA GENERADA POR IA", respuesta || "MENSAJE VACÍO");
 
     // --- LÓGICA DE PROCESAMIENTO DE CIERRE DE VENTA ---
     if (respuesta.includes('"finalizar": true')) {
@@ -491,7 +505,20 @@ client.on("message", async (msg) => {
     }
 
     if (respuesta.trim() !== "") {
-      // Guardar en la memoria (Usuario + Bot)
+      // --- NUEVO: SIMULAR TIEMPO "ESCRIBIENDO..." ---
+      // Calculamos el tiempo basado en el largo del mensaje. ~40 a 80 ms por letra.
+      const caracteres = respuesta.length;
+      let tiempoEscribiendo = caracteres * randomDelay(40, 80);
+
+      // Topes de seguridad: Mínimo 2 segundos, máximo 12 segundos (para que el cliente no se desespere esperando).
+      tiempoEscribiendo = Math.min(Math.max(tiempoEscribiendo, 2000), 12000);
+
+      // Enviamos la señal visual a WhatsApp de que se está tipeando el mensaje
+      await chat.sendStateTyping();
+      await delay(tiempoEscribiendo);
+      await chat.clearState(); // Apagamos el estado "escribiendo"
+      // ------------------------------------------------
+
       sessions[sender].push({ role: "user", content: msg.body });
       sessions[sender].push({ role: "assistant", content: respuesta });
 
@@ -520,9 +547,15 @@ client.on("message", async (msg) => {
     }
   } catch (error) {
     console.error("Error en proceso de respuesta:", error);
+    // Asegurarse de limpiar el estado de tipeo si ocurre un error grave
+    if (msg.from) {
+      try {
+        const chat = await msg.getChat();
+        await chat.clearState();
+      } catch (e) {}
+    }
   }
 
-  // Ahora esto sí funcionará gracias a --expose-gc en el package.json
   if (global.gc) {
     global.gc();
   }
