@@ -92,14 +92,13 @@ const puppeteerConfig = {
         "--no-first-run",
         "--no-zygote",
         "--disable-gpu",
-        "--single-process",
         "--disable-extensions",
         "--disable-notifications",
         "--disable-remote-fonts",
         "--disable-voice-input",
         "--disable-software-rasterizer",
         "--mute-audio",
-        "--js-flags=--max-old-space-size=350",
+        "--js-flags=--max-old-space-size=512",
       ],
 };
 
@@ -346,9 +345,9 @@ client.on("message", async (msg) => {
     return;
 
   // FILTRO DE NÚMERO AUTORIZADO (Solo responde a este número)
-   const numeroAutorizado = "280779343003800@lid"; // anthony
-   const numeroAutorizado2 = "77425526444166@lid"; // ossuan
-   if (msg.from !== numeroAutorizado && msg.from !== numeroAutorizado2) return;
+  const numeroAutorizado = "280779343003800@lid"; // anthony
+  const numeroAutorizado2 = "77425526444166@lid"; // ossuan
+  if (msg.from !== numeroAutorizado && msg.from !== numeroAutorizado2) return;
 
   const contact = await msg.getContact();
   if (contact.isEnterprise) return;
